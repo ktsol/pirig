@@ -1,6 +1,6 @@
-# Healty Rig service
+# RaspberryPi controlled mining rigs
 
-### Configure as systemd service
+## HealtyRig miner status service
 
 Create file /etc/systemd/system/healthyrig.service
 ```
@@ -9,7 +9,7 @@ Description=HealtyRig
 
 [Service]
 Type=simple
-ExecStart=/path/to/bin/healthyrig -d /path/to/your/configuration/healthyrig.toml
+ExecStart=/path/to/bin/healthyrig -g 4 -p 4242
 User=root
 Group=root
 Restart=always
@@ -17,3 +17,5 @@ Restart=always
 [Install]
 WantedBy=multi-user.target
 ```
+
+## ThorinPi controller

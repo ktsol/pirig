@@ -1,3 +1,0 @@
-service="bluetooth"
-port=4242
-gpus=4

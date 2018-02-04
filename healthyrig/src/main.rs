@@ -8,7 +8,6 @@ use getopts::Options;
 use tiny_http::{Server, Response};
 
 use std::env;
-use std::error::Error;
 use std::fs::{read_dir, File};
 use std::io::Error as IoError;
 use std::io::Read;
@@ -18,12 +17,13 @@ use std::process::Command;
 
 pub static HWDIR: &'static str = "/sys/class/hwmon";
 
-#[derive(Debug, Deserialize)]
+
+#[derive(Debug)]
 struct Config {
     service: String,
-    port: usize,
     gpus: usize,
 }
+
 
 #[derive(Debug, Serialize)]
 struct CheckResult {
@@ -55,19 +55,10 @@ fn print_help(program: &str, opts: Options) {
 }
 
 
-fn run_server(cfg: Config) {
-    let server = Server::http(format!("0.0.0.0:{}", cfg.port)).unwrap();
-    println!("Server started at port {}", cfg.port);
+fn run_server(port: usize, cfg: Config) {
+    let server = Server::http(format!("0.0.0.0:{}", port)).unwrap();
+    println!("Server started at port {}", port);
     for request in server.incoming_requests() {
-
-        /*
-        println!(
-            "received request! method: {:?}, url: {:?}, headers: {:?}",
-            request.method(),
-            request.url(),
-            request.headers()
-        );
-        */
 
         let not_root = request.url() != "/";
         if not_root {
@@ -78,7 +69,9 @@ fn run_server(cfg: Config) {
                 request.url()
             );
             let response = Response::from_string("FUCK YOU!");
-            request.respond(response);
+            if let Err(e) = request.respond(response) {
+                println!("ERROR {:?}", e);
+            }
 
         } else {
             println!(
@@ -102,15 +95,16 @@ fn main() {
     let program = args[0].clone();
 
     let mut opts = Options::new();
-    opts.optflag("d", "daemon", "run as daemon");
-    opts.optflag("i", "info", "output health check info");
     opts.optflag("h", "help", "print this help menu");
+    opts.optflag("i", "info", "output health check info");
     opts.optopt(
-        "c",
-        "config",
-        "set configuration *.toml file path",
-        "config.toml",
+        "s",
+        "service",
+        "systemd service name to monitor (default \"miner\")",
+        "SERVICE_NAME",
     );
+    opts.optopt("p", "port", "run daemon server at port", "PORT");
+    opts.optopt("g", "gpus", "expected GPUs count", "NUMBER");
 
     let matches;
     match opts.parse(&args[1..]) {
@@ -124,28 +118,18 @@ fn main() {
         }
     };
 
+    let mut cfg = Config {
+        service: String::from("miner"),
+        gpus: 0,
+    };
 
-    let cfg_path = matches.opt_str("c");
-    if cfg_path.is_none() {
-        print_help(&program, opts);
-        return;
+    if let Some(service) = matches.opt_str("s") {
+        cfg.service = service;
     }
 
-    let config_text = read_config(&cfg_path.unwrap());
-    if config_text.is_err() {
-        println!("ERROR reading config file: {}\n", config_text.unwrap_err());
-        print_help(&program, opts);
-        return;
+    if let Some(g) = matches.opt_str("g") {
+        cfg.gpus = g.parse::<usize>().unwrap_or(0);
     }
-
-    let rcfg = toml::from_str::<Config>(config_text.unwrap().as_str());
-    if rcfg.is_err() {
-        println!("ERROR reading config: {}\n", rcfg.unwrap_err());
-        print_help(&program, opts);
-        return;
-    }
-
-    let cfg = rcfg.unwrap();
 
     if matches.opt_present("i") {
         let r = check_all(&cfg);
@@ -153,9 +137,10 @@ fn main() {
         return;
     }
 
+
     // DAEMON
-    if matches.opt_present("d") {
-        run_server(cfg);
+    if let Some(p) = matches.opt_str("p").and_then(|v| v.parse::<usize>().ok()) {
+        run_server(p, cfg);
     }
 }
 
@@ -173,7 +158,7 @@ fn check_all(cfg: &Config) -> CheckResult {
 
 
 fn check_hw_errors(cfg: &Config, temp_readings_count: usize) -> bool {
-    if temp_readings_count != cfg.gpus {
+    if cfg.gpus > 0 && temp_readings_count != cfg.gpus {
         return false;
     }
 
