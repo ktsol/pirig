@@ -1,0 +1,3 @@
+[submodule "sensors"]
+	path = sensors
+	url = https://rumatoest@github.com/rumatoest/gpio-sensors

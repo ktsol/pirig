@@ -1,0 +1,13 @@
+[package]
+name = "ThorinPi"
+version = "0.0.1"
+authors = ["rumatoest"]
+
+[dependencies]
+getopts = "0.2.15"
+toml = "0.4.5"
+serde = "1.0.27"
+serde_derive = "1.0.27"
+rppal = "0.2.0"
+libc = "0.2.36"
+gpio_sensors = { version="0.0.1", path  = "../sensors", features = ["use_libc"] }

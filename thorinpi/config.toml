@@ -1,0 +1,4 @@
+
+[[rigs]]
+gpio_power=18
+gpio_switch=17
