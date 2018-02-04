@@ -9,7 +9,6 @@ use tiny_http::{Server, Response};
 
 use std::env;
 use std::fs::{read_dir, File};
-use std::io::Error as IoError;
 use std::io::Read;
 use std::path::PathBuf;
 use std::process::Command;
@@ -31,21 +30,6 @@ struct CheckResult {
     temp: Vec<i32>,
     service: bool,
     hw_errors: bool,
-}
-
-
-fn read_config(path: &String) -> Result<String, IoError> {
-    let p = PathBuf::from(path);
-    match File::open(p) {
-        Ok(mut f) => {
-            let mut s = String::new();
-            match f.read_to_string(&mut s) {
-                Ok(_) => Ok(s),
-                Err(e) => Err(e),
-            }
-        }
-        Err(err) => Err(err),
-    }
 }
 
 
@@ -83,7 +67,9 @@ fn run_server(port: usize, cfg: Config) {
 
             let checks = check_all(&cfg);
             let response = Response::from_string(toml::to_string(&checks).unwrap());
-            request.respond(response);
+            if let Err(e) = request.respond(response) {
+                println!("ERROR {:?}", e);
+            }
         }
     }
 }
@@ -159,7 +145,7 @@ fn check_all(cfg: &Config) -> CheckResult {
 
 fn check_hw_errors(cfg: &Config, temp_readings_count: usize) -> bool {
     if cfg.gpus > 0 && temp_readings_count != cfg.gpus {
-        return false;
+        return true;
     }
 
     let logs = read_service_logs(&cfg.service);
@@ -272,7 +258,7 @@ fn get_nv_temp(gpu_id: usize) -> Result<i32, ()> {
         .output();
     if let Ok(cmd) = rcmd {
         let out = String::from(String::from_utf8_lossy(&cmd.stdout));
-        out.trim().parse::<i32>().map_err(|e| ())
+        out.trim().parse::<i32>().map_err(|_| ())
     } else {
         Err(())
     }
@@ -322,7 +308,7 @@ fn check_service(name: &String) -> bool {
 fn check_hostname() -> String {
     match Command::new("hostname").output() {
         Ok(cmd) => String::from(String::from_utf8_lossy(&cmd.stdout).trim()),
-        Err(e) => {
+        Err(_) => {
             //println!("ERROR: Can not call systemctl: {}", e);
             String::from("undefined")
         }

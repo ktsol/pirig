@@ -5,7 +5,7 @@
 Create file /etc/systemd/system/healthyrig.service
 ```
 [Unit]
-Description=HealtyRig
+Description=healtyrig
 
 [Service]
 Type=simple
