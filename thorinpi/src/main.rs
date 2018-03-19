@@ -1,54 +1,63 @@
-extern crate getopts;
+extern crate env_logger;
+extern crate gpio_sensors;
+extern crate libc;
+#[macro_use]
+extern crate log;
+extern crate reqwest;
 extern crate rppal;
 #[macro_use]
 extern crate serde_derive;
 extern crate toml;
-extern crate libc;
-extern crate gpio_sensors;
 
-use gpio_sensors::dht;
-use rppal::gpio::{Gpio, Mode, Level};
-use rppal::system::DeviceInfo;
+mod core;
+mod rig;
+mod vent;
+mod sensor;
 
-
-mod conf;
-
-
-use conf::Settings;
-use conf::RigCfg;
+use core::Settings;
+use rig::Rig;
+use sensor::TSensor;
+use vent::Vent;
 
 use std::thread;
-use std::time::{Instant, Duration};
+use std::time::{Duration};
 
 use std::env;
 use std::fs::File;
 use std::io::Error;
 use std::io::Read;
+use std::io::Write;
 use std::path::Path;
 use std::path::PathBuf;
 use std::process::exit;
-
+use std::rc::Rc;
 
 pub fn read_file(p: &PathBuf) -> Result<String, Error> {
-    match File::open(p) {
-        Ok(mut f) => {
-            let mut s = String::new();
-            match f.read_to_string(&mut s) {
-                Ok(_) => Ok(s),
-                Err(e) => Err(e),
-            }
-        }
-        Err(err) => Err(err),
-    }
+    File::open(p).and_then(|mut f| {
+        let mut s = String::new();
+        f.read_to_string(&mut s).map(|_| s)
+    })
 }
-
 
 fn print_usage(p: &str) {
-    println!("\nUsage: {} CONFIG.toml", p);
+    println!("\nUsage: {} ./path/to/config.toml", p);
 }
 
+fn build_logger() -> env_logger::Builder {
+    let mut b = env_logger::Builder::new();
+    b.target(env_logger::Target::Stderr);
+    b.format(|buf, record| writeln!(buf, "{}: {}", record.level(), record.args()));
+    if env::var("RUST_LOG").is_ok() {
+        b.parse(&env::var("RUST_LOG").unwrap());
+    }
+    b
+}
 
 fn main() {
+    let mut log = build_logger();
+    log.init();
+    // env_logger::init();
+    info!("Logger initialized!");
     let args: Vec<String> = env::args().collect();
     let program = args[0].clone();
 
@@ -59,84 +68,67 @@ fn main() {
         exit(1);
     };
 
-    if !toml_path.exists() || !toml_path.is_file() {
-        print_usage(&program);
-        exit(1);
-    }
+    // if !toml_path.exists() || !toml_path.is_file() {
+    //     print_usage(&program);
+    //     exit(1);
+    // }
 
-    let settings: Settings = match read_file(&toml_path.to_path_buf()) {
-        Ok(s) => match toml::from_str(&s) {
-            Ok(c) => c,
-            Err(e) => {
-                print_usage(&program);
-                println!("ERROR parsing TOML file {:?}", e);
-                exit(1);
-            }
-        }
-        Err(e) => {
-            print_usage(&program);
-            println!("ERROR reading TOML file {:?}", e);
-            exit(1);
-        }
-    };
+    let settings = read_file(&toml_path.to_path_buf())
+        .map(|it| {
+            toml::from_str::<Settings>(&it).expect(&format!(
+                "Error parsing TOML file {}",
+                toml_path.to_string_lossy()
+            ))
+        })
+        .expect(&format!(
+            "Error readin TOML file {}",
+            toml_path.to_string_lossy()
+        ));
 
-    match DeviceInfo::new() {
-        Ok(di) => {
-            println!("Model: {} (SoC: {})", di.model(), di.soc());
-        }
-        Err(e) => {
-            println!("ERROR {}", e)
-        }
-    }
+    // match DeviceInfo::new() {
+    //     Ok(di) => {
+    //         println!("Model: {} (SoC: {})", di.model(), di.soc());
+    //     }
+    //     Err(e) => println!("ERROR {}", e),
+    // }
 
-    println!("SETTINGS {:?}", settings);
+    trace!("SETTINGS {:?}", settings);
     application(settings);
     exit(0);
 }
 
-fn application(settings:Settings) {
+fn application(settings: Settings) {
+    let mut rigs: Vec<Rig> = Vec::new();
+    let mut sensors = Vec::<Rc<TSensor>>::new();
+    let mut vents = Vec::<Vent>::new();
 
-    let mut gpio = Gpio::new().unwrap();
-    // Pin::new()
     for rig in &settings.rigs {
-        // gpio.set_mode(rig.gpio_power, Mode::Input);
-        // gpio.set_mode(rig.gpio_switch, Mode::Output);
+        rigs.push(Rig::new(rig));
     }
 
-    let mut count: usize = 0;
-    let mut sensor = dht::DhtSensor::new(27, dht::DhtType::DHT11).unwrap();
-    
-    while true {
-        for rig in &settings.rigs {
-            match gpio.read(rig.gpio_power) {
-                Ok(v) => println!("READ {}", v),
-                Err(e) => println!("Can not read {}", e)
+    for s in &settings.sensors {
+        sensors.push(Rc::new(TSensor::new(s)));
+    }
+
+    for v in &settings.vents {
+        vents.push(Vent::new(v, &sensors));
+    }
+
+    loop {
+
+        let mut gpu_temps = Vec::<isize>::new();
+        for r in &mut rigs {
+            if let Some(mut res) = r.handle() {
+                gpu_temps.append(&mut res.temp);
             }
-
-            // if count % 2 == 0 {
-            //     gpio.write(rig.gpio_switch, Level::High)
-            // } else {
-            //     gpio.write(rig.gpio_switch, Level::Low)
-            // }
-
-
-
-                // let v = sensor.read_optimistic();
-                // println!(" {}C {}%", v.temperature(), v.humidity());
-                // let ht = sensor.read_until(0, 2);
-               
-                let ht = sensor.read();
-                if let Ok(v) = ht {
-                    println!(" {}C {}%", v.temperature(), v.humidity());
-                } else {
-                    println!("SENSOR {:?}", ht);
-                }
-
-
-
+            // println!("RESULT {:?}", h);
         }
 
-        count += 1;
-        thread::sleep(Duration::from_millis(500));
+        // Ventilation stuff
+        for v in &mut vents {
+            v.handle(&gpu_temps);
+        }
+
+        thread::sleep(Duration::from_millis(1000));
     }
 }

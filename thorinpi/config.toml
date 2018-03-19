@@ -1,4 +1,30 @@
+#Temparature DHT11 sensors
+[[sensors]]
+id="tube1"
+gpio=15
 
+# Define controlled rig instance
 [[rigs]]
+#Healthyrig service
+uri="http://192.168.10.50:4242"
+#pin connected to power LED
 gpio_power=18
+#pin connected to power switch
 gpio_switch=17
+# Critical GPU temperature 
+# when rig must to turned OFF
+# critical_gpu_temp=85 # Optional default is 85
+
+# Ventilation units that can be activated by gpio
+# Something like additonal external ventilator
+[[vents]]
+# Pin to activate device
+gpio=22
+# linked temperature sensors
+sensors=["tube1"]
+# triggers temperature from sensors to activate/deactivate pin
+sensors_temp_on=70
+sensors_temp_off=68
+# trigger temperatures from all rigs gpus to activate/deactivate pin
+rig_temp_on=65
+rig_temp_off=64
