@@ -161,6 +161,9 @@ fn check_hw_errors(cfg: &Config, temp_readings_count: usize) -> bool {
         logs.contains("cannot get current temperature, error"),
         logs.contains("are stopped. Restart attemp"),
         logs.contains("Thread exited with code"),
+        //  Miner thread hangs, need to restart miner!
+        logs.contains("Miner thread hangs"),
+        logs.contains("need to restart miner!"),
     ];
 
     for c in checks {

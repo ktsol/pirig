@@ -15,12 +15,12 @@ mod vent;
 mod sensor;
 
 use core::Settings;
-use rig::Rig;
+use rig::{Rig, RigCheckResult};
 use sensor::TSensor;
 use vent::Vent;
 
 use std::thread;
-use std::time::{Duration};
+use std::time::Duration;
 
 use std::env;
 use std::fs::File;
@@ -31,6 +31,8 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::process::exit;
 use std::rc::Rc;
+use std::cell::RefCell;
+use std::error::Error as ErrorStd;
 
 pub fn read_file(p: &PathBuf) -> Result<String, Error> {
     File::open(p).and_then(|mut f| {
@@ -81,7 +83,7 @@ fn main() {
             ))
         })
         .expect(&format!(
-            "Error readin TOML file {}",
+            "Error reading TOML file {}",
             toml_path.to_string_lossy()
         ));
 
@@ -92,14 +94,14 @@ fn main() {
     //     Err(e) => println!("ERROR {}", e),
     // }
 
-    trace!("SETTINGS {:?}", settings);
+    info!("SETTINGS LOADED\n{:?}", settings);
     application(settings);
     exit(0);
 }
 
 fn application(settings: Settings) {
     let mut rigs: Vec<Rig> = Vec::new();
-    let mut sensors = Vec::<Rc<TSensor>>::new();
+    let mut sensors = Vec::<Rc<RefCell<TSensor>>>::new();
     let mut vents = Vec::<Vent>::new();
 
     for rig in &settings.rigs {
@@ -107,21 +109,33 @@ fn application(settings: Settings) {
     }
 
     for s in &settings.sensors {
-        sensors.push(Rc::new(TSensor::new(s)));
+        sensors.push(Rc::new(RefCell::new(TSensor::new(s))));
     }
+
+    debug!("Sensors loaded {:?}", sensors);
 
     for v in &settings.vents {
         vents.push(Vent::new(v, &sensors));
     }
+    debug!("Sensors after vents {:?}", sensors);
+
+    let mut cycle = 0;
 
     loop {
-
+        // let ref mut ss:Vec<Rc<TSensor>> = sensors;
         let mut gpu_temps = Vec::<isize>::new();
         for r in &mut rigs {
             if let Some(mut res) = r.handle() {
-                gpu_temps.append(&mut res.temp);
+                gpu_temps.append(&mut res.temp.clone());
+                if cycle % 60 == 0 {
+                    show_rig_check(&res);
+                }
             }
             // println!("RESULT {:?}", h);
+        }
+
+        if cycle % 60 == 0 {
+            info!("Temperatures: {}", format_temperature(&sensors));
         }
 
         // Ventilation stuff
@@ -129,6 +143,36 @@ fn application(settings: Settings) {
             v.handle(&gpu_temps);
         }
 
+        cycle = (cycle + 1) % 1000_000;
         thread::sleep(Duration::from_millis(1000));
     }
+}
+
+fn format_temperature(sensors: &Vec<Rc<RefCell<TSensor>>>) -> String {
+    sensors
+        .into_iter()
+        .map(|s| s.clone())
+        .map(|rc| {
+            rc.try_borrow_mut()
+                //.ok_or(String::from("Can not get mutable access"))
+                .map_err(|e| String::from(e.description()))
+                .and_then(|ref mut s| s.temperature())
+        })
+        .filter_map(|s| s.ok())
+        .fold(String::new(), |acc, num| acc + &num.to_string() + "C ")
+}
+
+fn show_rig_check(check: &RigCheckResult) {
+    info!(
+        "{} led_on:{} service:{} errors:{} temps:{:?}",
+        check.hostname,
+        check.led_on.unwrap_or(false),
+        check.service,
+        check.hw_errors,
+        check.temp.clone() // check
+                           //     .temp
+                           //     .clone()
+                           //     .into_iter()
+                           //     .fold(String::new(), |acc, num| acc + &num.to_string() + ", ")
+    );
 }
